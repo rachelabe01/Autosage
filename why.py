@@ -1,61 +1,53 @@
 import streamlit as st
 import pandas as pd
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-def perform_pca(data):
-    # Handle categorical variables with label encoding
-    label_encoders = {}
-    for i in range(data.shape[1]):
-        if isinstance(data[0, i], str):
-            label_encoders[i] = LabelEncoder()
-            data[:, i] = label_encoders[i].fit_transform(data[:, i])
+# Function to handle missing values
+def handle_missing_values(dataset):
+    missing_values = dataset.isnull().sum()
+    if missing_values.any():
+        imputer = SimpleImputer(strategy='mean')
+        dataset = pd.DataFrame(imputer.fit_transform(dataset), columns=dataset.columns)
+    return dataset
 
-    # Standardize the data
-    scaler = StandardScaler()
-    data_scaled = scaler.fit_transform(data)
+# Function to determine problem type
+def determine_problem_type(target_column):
+    if pd.api.types.is_numeric_dtype(target_column):
+        num_unique_values = target_column.nunique()
+        data_range = target_column.max() - target_column.min()
+        if num_unique_values < 10 or data_range < 0.1 * num_unique_values:
+            return 'Classification'
+        else:
+            return 'Regression'
 
-    # Perform PCA
-    pca = PCA()
-    pca.fit(data_scaled)
-    data_reduced = pca.transform(data_scaled)
-
-    return data_reduced, pca.explained_variance_ratio_, pca.components_
-
+# Main function
 def main():
-    st.title("PCA Visualization")
+    st.title('Machine Learning Problem Type Detection and Analysis')
 
-    # Upload dataset
-    st.header("Upload Dataset")
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    # Upload files
+    uploaded_files = st.file_uploader("Upload CSV files", accept_multiple_files=True, type=['csv'])
 
-    if uploaded_file is not None:
-        data = pd.read_csv(uploaded_file)
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            st.write(f"### {uploaded_file.name}")
+            dataset = pd.read_csv(uploaded_file)
 
-        # Display the dataset
-        st.subheader("Original Dataset")
-        st.write(data)
+            # Label encoding for categorical columns
+            categorical_columns = dataset.select_dtypes(include=['object']).columns
+            label_encoder = LabelEncoder()
+            for column in categorical_columns:
+                dataset[column] = label_encoder.fit_transform(dataset[column])
 
-        # Perform PCA
-        data_array = data.values
-        data_reduced, explained_variance_ratio, components = perform_pca(data_array)
+            # Handling missing values
+            dataset = handle_missing_values(dataset)
 
-        # Display explained variance ratio
-        st.subheader("Explained Variance Ratio")
-        st.write(explained_variance_ratio)
+            # Determine problem type
+            target_column = dataset.iloc[:, -1]
+            problem_type = determine_problem_type(target_column)
+            st.write(f"The identified machine learning problem type is: {problem_type}")
 
-        # Display the reduced dataset
-        st.subheader("Reduced Dataset")
-        reduced_df = pd.DataFrame(data_reduced, columns=[f"PC{i+1}" for i in range(data_reduced.shape[1])])
-        st.write(reduced_df)
-
-        # Display top features for each principal component
-        st.subheader("Top Features for Each Principal Component")
-        for i, component in enumerate(components):
-            st.write(f"Principal Component {i+1}")
-            top_features_idx = component.argsort()[-3:][::-1]
-            top_features_names = data.columns[top_features_idx]
-            st.write(top_features_names)
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
