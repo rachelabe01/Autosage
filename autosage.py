@@ -1,35 +1,80 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.metrics import precision_score, f1_score, mean_squared_error, r2_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.decomposition import PCA
-
 import pickle
 import base64
 
+def find_potential_target_column(df):
+    df_numeric = df.select_dtypes(include=['number'])  # Select only numeric columns
+    df_numeric.dropna(axis=1, how='all', inplace=True)  # Drop columns with all NaN values
+
+    if len(df_numeric.columns) > 2000:
+        return find_potential_target_column_using_silhouette_score(df_numeric)
+    else:
+        return find_potential_target_column_using_correlation(df_numeric)
+
+def find_potential_target_column_using_silhouette_score(df_numeric):
+    # Fill any missing values
+    df_numeric.fillna(df_numeric.mean(), inplace=True)
+
+    # Standardize the features
+    scaler = StandardScaler()
+    scaled_features = scaler.fit_transform(df_numeric)
+
+    # Perform t-SNE to reduce dimensions to 2D
+    tsne = TSNE(n_components=2, random_state=42)
+    tsne_results = tsne.fit_transform(scaled_features)
+
+    # Compute silhouette score for each column
+    silhouette_scores = []
+    for col in df_numeric.columns:
+        target = df_numeric[col]
+        silhouette_scores.append(silhouette_score(tsne_results, target))
+
+    # Find the column with the highest silhouette score
+    most_potential_target_column = df_numeric.columns[np.argmax(silhouette_scores)]
+    return most_potential_target_column
+
+def find_potential_target_column_using_correlation(df_numeric):
+    # Fill any missing values
+    df_numeric.fillna(df_numeric.mean(), inplace=True)
+
+    # Standardize the features
+    scaler = StandardScaler()
+    scaled_features = scaler.fit_transform(df_numeric)
+
+    # Perform t-SNE to reduce dimensions to 2D
+    tsne = TSNE(n_components=2, random_state=42)
+    tsne_results = tsne.fit_transform(scaled_features)
+
+    # Compute correlation with t-SNE components for each column
+    correlation_with_tsne = []
+    for col in df_numeric.columns:
+        correlation = np.corrcoef(df_numeric[col], tsne_results[:, 0])[0, 1]
+        correlation_with_tsne.append(abs(correlation))
+
+    # Find the column with the highest correlation with t-SNE components
+    most_potential_target_column = df_numeric.columns[np.argmax(correlation_with_tsne)]
+    return most_potential_target_column
+
 def identify_problem_type(df):
-    target_column = df.iloc[:, -1]
-    unique_values = target_column.unique()
-    num_unique_values = len(unique_values)
-    if num_unique_values < 3:
+    # Find the potential target column
+    potential_target_column = find_potential_target_column(df)
+
+    # Count the number of unique values in the potential target column
+    unique_values_count = df[potential_target_column].nunique()
+
+    # Check if the unique values count is less than or equal to 3
+    if unique_values_count <= 3:
         return 'Classification'
     else:
-        # Use PCA to analyze the target column
-        pca = PCA(n_components=1)
-        target_pca = pca.fit_transform(target_column.values.reshape(-1, 1))
-        if pca.explained_variance_ratio_[0] > 0.95:
-            return 'Regression'
-        else:
-            return 'Classification'
-
-def label_encode_categorical(df):
-    le = LabelEncoder()
-    categorical_columns = df.select_dtypes(include=['object']).columns
-    for col in categorical_columns:
-        df[col] = le.fit_transform(df[col])
-    return df
+        return 'Regression'
 
 def evaluate_classification(df):
     X = df.drop(columns=[df.columns[-1]])
@@ -53,38 +98,6 @@ def evaluate_regression(df):
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
     return mse, r2, model
-def train_and_evaluate_classification(df, model, X_train, X_test, y_train, y_test, model_name):
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    precision = precision_score(y_test, y_pred, average='weighted')
-    f1 = f1_score(y_test, y_pred, average='weighted')
-    st.write(f"Model: {model_name}")
-    st.write(f"Precision: {precision}")
-    st.write(f"F1 Score: {f1}")
-
-    # Save the trained model using pickle
-    with open(f"{model_name}.pkl", "wb") as f:
-        pickle.dump(model, f)
-
-    # Display download link
-    st.markdown(f"[Download {model_name}.pkl](/download/{model_name}.pkl)", unsafe_allow_html=True)
-
-def train_and_evaluate_regression(df, model, X_train, X_test, y_train, y_test, model_name):
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    st.write(f"Model: {model_name}")
-    
-    st.write(f"R2 Score: {r2}")
-
-    # Save the trained model using pickle
-    with open(f"{model_name}.pkl", "wb") as f:
-        pickle.dump(model, f)
-
-    # Display download link
-    st.markdown(f"[Download {model_name}.pkl](/download/{model_name}.pkl)", unsafe_allow_html=True)
-
 
 def compare_datasets(dataset_info):
     sorted_datasets = sorted(dataset_info, key=lambda x: (x['f1_score'] if x['problem_type'] == 'Classification' else -x['mse']), reverse=True)
@@ -105,7 +118,7 @@ def main():
             st.write(f"**{file_name}**: {problem_type}")
             st.write(df)
 
-            df = label_encode_categorical(df)
+            df = df.select_dtypes(include=np.number)  # Drop categorical columns
 
             if problem_type == 'Classification':
                 precision, f1, model = evaluate_classification(df)
@@ -145,21 +158,20 @@ def main():
             st.write(f"Model Mean Squared Error: {top_dataset['mse']}, R2 Score: {top_dataset['r2_score']}")
 
         # Save model
-        # Save model
-        st.write("Do you want to download the trained model?")
         model_name = top_dataset['name'].split('.')[0] + '_model.pkl'
         with open(model_name, 'wb') as f:
             pickle.dump(top_dataset['model'], f)
-        # Read the saved model to display as a download button
+
+        # Display download link
+        st.write("Do you want to download the trained model?")
         with open(model_name, "rb") as f:
             model_bytes = f.read()
             st.download_button(
-            label="Download Model",
-            data=model_bytes,
-            file_name=model_name,
-            mime="application/octet-stream"
-        )
-
+                label="Download Model",
+                data=model_bytes,
+                file_name=model_name,
+                mime="application/octet-stream"
+            )
 
 if __name__ == "__main__":
     main()
