@@ -9,22 +9,6 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 from sklearn.metrics import precision_score, f1_score, mean_squared_error, r2_score
 import pickle
 import base64
-from sklearn.feature_selection import SelectFromModel
-from sklearn.preprocessing import LabelEncoder
-from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import cross_val_score
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import TruncatedSVD
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.metrics import accuracy_score
-import spacy
-
-# Load English tokenizer, tagger, parser, NER and word vectors
-nlp = spacy.load("en_core_web_sm")
 
 def find_potential_target_column(df):
     df_numeric = df.select_dtypes(include=['number'])  # Select only numeric columns
@@ -101,8 +85,7 @@ def evaluate_classification(df):
     y_pred = model.predict(X_test)
     precision = precision_score(y_test, y_pred)
     f1 = f1_score(y_test, y_pred)
-    accuracy = accuracy_score(y_test, y_pred)
-    return accuracy, precision, f1, model
+    return precision, f1, model
 
 def evaluate_regression(df):
     numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns
@@ -117,7 +100,7 @@ def evaluate_regression(df):
     return mse, r2, model
 
 def compare_datasets(dataset_info):
-    sorted_datasets = sorted(dataset_info, key=lambda x: (x['accuracy'] if x['problem_type'] == 'Classification' else -x['mse']), reverse=True)
+    sorted_datasets = sorted(dataset_info, key=lambda x: (x['f1_score'] if x['problem_type'] == 'Classification' else -x['mse']), reverse=True)
     return sorted_datasets[:3]
 
 def main():
@@ -138,8 +121,8 @@ def main():
             df = df.select_dtypes(include=np.number)  # Drop categorical columns
 
             if problem_type == 'Classification':
-                accuracy, precision, f1, model = evaluate_classification(df)
-                metrics = {'accuracy': accuracy, 'precision_score': precision, 'f1_score': f1}
+                precision, f1, model = evaluate_classification(df)
+                metrics = {'precision_score': precision, 'f1_score': f1}
             elif problem_type == 'Regression':
                 mse, r2, model = evaluate_regression(df)
                 metrics = {'mse': mse, 'r2_score': r2}
@@ -159,7 +142,7 @@ def main():
         for idx, dataset in enumerate(top_datasets):
             st.write(f"{idx + 1}. Name: {dataset['name']}, Problem Type: {dataset['problem_type']}")
             if dataset['problem_type'] == 'Classification':
-                st.write(f"   Accuracy: {dataset['accuracy']}, Precision Score: {dataset['precision_score']}, F1 Score: {dataset['f1_score']}")
+                st.write(f"   F1 Score: {dataset['f1_score']}, Precision Score: {dataset['precision_score']}")
             elif dataset['problem_type'] == 'Regression':
                 st.write(f"   Mean Squared Error: {dataset['mse']}, R2 Score: {dataset['r2_score']}")
 
@@ -170,7 +153,7 @@ def main():
 
         # Display model accuracy
         if top_dataset['problem_type'] == 'Classification':
-            st.write(f"Model Accuracy: {top_dataset['accuracy']}, Precision Score: {top_dataset['precision_score']}, F1 Score: {top_dataset['f1_score']}")
+            st.write(f"Model F1 Score: {top_dataset['f1_score']}, Precision Score: {top_dataset['precision_score']}")
         elif top_dataset['problem_type'] == 'Regression':
             st.write(f"Model Mean Squared Error: {top_dataset['mse']}, R2 Score: {top_dataset['r2_score']}")
 
@@ -191,4 +174,4 @@ def main():
             )
 
 if __name__ == "__main__":
-    main()
+    main() 
