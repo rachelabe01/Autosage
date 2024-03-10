@@ -3,10 +3,8 @@ import pandas as pd
 import numpy as np
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import silhouette_score
-from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-from sklearn.metrics import precision_score, f1_score, mean_squared_error, r2_score
 import pickle
 import base64
 
@@ -20,8 +18,9 @@ def find_potential_target_column(df):
         return find_potential_target_column_using_correlation(df_numeric)
 
 def find_potential_target_column_using_silhouette_score(df_numeric):
-    # Fill any missing values
-    df_numeric.fillna(df_numeric.mean(), inplace=True)
+    # Fill missing values
+    imputer = SimpleImputer(strategy='mean')
+    df_numeric = pd.DataFrame(imputer.fit_transform(df_numeric), columns=df_numeric.columns)
 
     # Standardize the features
     scaler = StandardScaler()
@@ -42,8 +41,9 @@ def find_potential_target_column_using_silhouette_score(df_numeric):
     return most_potential_target_column
 
 def find_potential_target_column_using_correlation(df_numeric):
-    # Fill any missing values
-    df_numeric.fillna(df_numeric.mean(), inplace=True)
+    # Fill missing values
+    imputer = SimpleImputer(strategy='mean')
+    df_numeric = pd.DataFrame(imputer.fit_transform(df_numeric), columns=df_numeric.columns)
 
     # Standardize the features
     scaler = StandardScaler()
@@ -76,102 +76,107 @@ def identify_problem_type(df):
     else:
         return 'Regression'
 
-def evaluate_classification(df):
-    X = df.drop(columns=[df.columns[-1]])
-    y = df[df.columns[-1]]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    model = HistGradientBoostingClassifier()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    precision = precision_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    return precision, f1, model
+def preprocess_data(df):
+    # Drop categorical columns
+    df_numeric = df.select_dtypes(include=np.number)
 
-def evaluate_regression(df):
-    numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns
-    X = df[numeric_columns].drop(columns=[df.columns[-1]])  # Exclude target column
-    y = df[df.columns[-1]]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    model = HistGradientBoostingRegressor()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    return mse, r2, model
+    # Handling missing values
+    imputer = SimpleImputer(strategy='mean')
+    df_numeric = pd.DataFrame(imputer.fit_transform(df_numeric), columns=df_numeric.columns)
 
-def compare_datasets(dataset_info):
-    sorted_datasets = sorted(dataset_info, key=lambda x: (x['f1_score'] if x['problem_type'] == 'Classification' else -x['mse']), reverse=True)
-    return sorted_datasets[:3]
+    # Scale the features
+    scaler = StandardScaler()
+    df_scaled = pd.DataFrame(scaler.fit_transform(df_numeric), columns=df_numeric.columns)
+
+    return df_scaled
+
+def evaluate_top_dataset(df_scaled):
+    X = df_scaled.drop(columns=[df_scaled.columns[-1]])
+    y = df_scaled[df_scaled.columns[-1]]
+    
+    if identify_problem_type(df_scaled) == 'Classification':
+        # Convert target variable to categorical for classification
+        y = y.astype(int).astype(str)
+
+        model = HistGradientBoostingClassifier()
+    else:
+        model = HistGradientBoostingRegressor()
+        
+    model.fit(X, y)
+    return model
+
+
+import base64
+
+def get_download_link(file_content, file_name):
+    """
+    Generate a download link for the given file content and file name.
+    
+    Args:
+    - file_content: The binary content of the file to be downloaded.
+    - file_name: The name of the file for the download.
+    
+    Returns:
+    - A string containing an HTML anchor tag with a link to download the file.
+    """
+    # Encode the file content to base64
+    b64 = base64.b64encode(file_content).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}">Download {file_name}</a>'
+    return href
+
 
 def main():
-    st.title("Dataset Comparison App")
-    st.write("Upload multiple datasets to identify their problem types, evaluate them, and rank them.")
+    st.title("Dataset Modeling and Comparison App")
+    st.write("Upload multiple datasets to identify their problem types, model them, and compare their performance.")
 
     uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
 
     dataset_info = []
+    dataframes = {}  # Dictionary to store DataFrames in memory
+    df_comparison = None  # Define df_comparison variable
+    
     if uploaded_files:
         for file in uploaded_files:
             file_name = file.name
             df = pd.read_csv(file)
-            problem_type = identify_problem_type(df)
-            st.write(f"**{file_name}**: {problem_type}")
-            st.write(df)
+            # Store the DataFrame in memory
+            dataframes[file_name] = df
+            st.write(f"**{file_name}**")
+            st.write(df.head())
 
-            df = df.select_dtypes(include=np.number)  # Drop categorical columns
+            df_scaled = preprocess_data(df)
 
-            if problem_type == 'Classification':
-                precision, f1, model = evaluate_classification(df)
-                metrics = {'precision_score': precision, 'f1_score': f1}
-            elif problem_type == 'Regression':
-                mse, r2, model = evaluate_regression(df)
-                metrics = {'mse': mse, 'r2_score': r2}
-            else:
-                st.warning(f"Skipping evaluation for dataset {file_name} as its problem type is unknown.")
-                continue
+            problem_type = identify_problem_type(df_scaled)
+            st.write(f"Problem Type: {problem_type}")
 
-            dataset_info.append({'name': file_name, 'problem_type': problem_type, **metrics, 'model': model})
+            # Compute correlation with t-SNE components
+            potential_target_column = find_potential_target_column(df)
+            correlation = np.corrcoef(df[potential_target_column], df_scaled.iloc[:, :-1], rowvar=False)[0, 1:]
 
-    if st.button("Compare"):
-        if len(dataset_info) < 2:
-            st.error("Please upload at least 2 datasets to compare.")
-            return
+            dataset_info.append({'name': file_name, 'problem_type': problem_type, 'correlation_with_tsne': correlation, 'model': None})
 
-        top_datasets = compare_datasets(dataset_info)
-        st.success("The top 3 datasets for your project are:")
-        for idx, dataset in enumerate(top_datasets):
-            st.write(f"{idx + 1}. Name: {dataset['name']}, Problem Type: {dataset['problem_type']}")
-            if dataset['problem_type'] == 'Classification':
-                st.write(f"   F1 Score: {dataset['f1_score']}, Precision Score: {dataset['precision_score']}")
-            elif dataset['problem_type'] == 'Regression':
-                st.write(f"   Mean Squared Error: {dataset['mse']}, R2 Score: {dataset['r2_score']}")
+    if dataset_info:
+        st.subheader("Dataset Comparison")
+        df_comparison = pd.DataFrame(dataset_info)
+        df_comparison['correlation_with_tsne'] = df_comparison['correlation_with_tsne'].apply(lambda x: np.abs(x).mean())  # Use mean correlation
+        df_comparison.sort_values(by='correlation_with_tsne', ascending=False, inplace=True)
+        st.write(df_comparison)
 
-        # Select top-ranked dataset
-        top_dataset = top_datasets[0]
-        st.subheader(f"Modeling Top Ranked Dataset: {top_dataset['name']}")
-        st.write(f"Problem Type: {top_dataset['problem_type']}")
+        if st.button("Download Top Ranked Model"):
+            top_dataset_name = df_comparison.iloc[0]['name']
+            # Retrieve the DataFrame from memory instead of reading from a file
+            df = dataframes[top_dataset_name]
 
-        # Display model accuracy
-        if top_dataset['problem_type'] == 'Classification':
-            st.write(f"Model F1 Score: {top_dataset['f1_score']}, Precision Score: {top_dataset['precision_score']}")
-        elif top_dataset['problem_type'] == 'Regression':
-            st.write(f"Model Mean Squared Error: {top_dataset['mse']}, R2 Score: {top_dataset['r2_score']}")
+            df_scaled = preprocess_data(df)
+            model = evaluate_top_dataset(df_scaled)
 
-        # Save model
-        model_name = top_dataset['name'].split('.')[0] + '_model.pkl'
-        with open(model_name, 'wb') as f:
-            pickle.dump(top_dataset['model'], f)
+            # Save model to a binary stream instead of a file to facilitate download
+            model_name = top_dataset_name.split('.')[0] + '_model.pkl'
+            model_bytes = pickle.dumps(model)
 
-        # Display download link
-        st.write("Do you want to download the trained model?")
-        with open(model_name, "rb") as f:
-            model_bytes = f.read()
-            st.download_button(
-                label="Download Model",
-                data=model_bytes,
-                file_name=model_name,
-                mime="application/octet-stream"
-            )
+            # Display download link
+            st.write("Do you want to download the trained model?")
+            st.markdown(get_download_link(model_bytes, model_name), unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main() 
+    main()
