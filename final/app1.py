@@ -153,21 +153,73 @@ def app1():
         b64_encoded_model = base64.b64encode(serialized_best_model).decode()
         href = f'<a href="data:file/txt;base64,{b64_encoded_model}" download="{best_model_name}.pkl">Download {best_model_name}</a>'
         st.markdown(href, unsafe_allow_html=True)
+        
+        return best_model_name, best_model_precision_or_r2, results_df, best_model  # Return the necessary values
+
+    def get_download_link(model_bytes, model_name):
+        b64_encoded_model = base64.b64encode(model_bytes).decode()
+        href = f'<a href="data:file/txt;base64,{b64_encoded_model}" download="{model_name}.pkl">Download {model_name}</a>'
+        return href
 
     st.title("Automated Textbased Model")
 
     # Upload dataset
-    uploaded_file = st.file_uploader("Choose a file")
-    if uploaded_file is not None:
-        # Read dataset
-        df = pd.read_csv(uploaded_file)
-        st.write(df.head())
-        
-        # Preprocess dataset
-        df_scaled = preprocess_data(df)
-        
-        # Evaluate dataset and provide download link for the best model
-        evaluate_top_dataset(df_scaled)
+    uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+
+    dataset_info = []
+    dataframes = {}  # Dictionary to store DataFrames in memory
+    df_comparison = None  # Define df_comparison variable
+    
+    if uploaded_files:
+        for file in uploaded_files:
+            file_name = file.name
+            df = pd.read_csv(file)
+            # Store the DataFrame in memory
+            dataframes[file_name] = df
+            st.write(f"**{file_name}**")
+            st.write(df.head())
+
+            df_scaled = preprocess_data(df)
+
+            problem_type = identify_problem_type(df_scaled)
+            st.write(f"Problem Type: {problem_type}")
+
+            # Compute correlation with t-SNE components
+            potential_target_column = find_potential_target_column(df)
+            correlation = np.corrcoef(df[potential_target_column], df_scaled.iloc[:, :-1], rowvar=False)[0, 1:]
+
+            dataset_info.append({'name': file_name, 'problem_type': problem_type, 'correlation_with_tsne': correlation, 'model': None})
+
+    if dataset_info:
+        st.subheader("Dataset Comparison")
+        df_comparison = pd.DataFrame(dataset_info)
+        df_comparison['correlation_with_tsne'] = df_comparison['correlation_with_tsne'].apply(lambda x: np.abs(x).mean())  # Use mean correlation
+        df_comparison.sort_values(by='correlation_with_tsne', ascending=False, inplace=True)
+        st.write(df_comparison)
+
+        if st.button("Download Top Ranked Model"):
+            top_dataset_name = df_comparison.iloc[0]['name']
+            # Retrieve the DataFrame from memory instead of reading from a file
+            df = dataframes[top_dataset_name]
+
+            df_scaled = preprocess_data(df)
+            best_model_name, best_model_precision_or_r2, results_df, best_model = evaluate_top_dataset(df_scaled)
+
+            # Save model to a binary stream instead of a file to facilitate download
+            model_name = top_dataset_name.split('.')[0] + '_model.pkl'
+            model_bytes = pickle.dumps(best_model)
+
+            # Print the information about the best model
+            st.write(f"The best model for {top_dataset_name} is: {best_model_name}")
+            st.write(f"Performance Metric: {best_model_precision_or_r2}")
+
+            # Display download link
+            st.write("Do you want to download the trained model?")
+            st.markdown(get_download_link(model_bytes, model_name), unsafe_allow_html=True)
+            
+            # Display performance metrics in tabular format
+            st.subheader("Performance Metrics")
+            st.table(results_df)
 
 # If this script is run directly (instead of being imported), just display the app's functionality
 if __name__ == '__main__':
