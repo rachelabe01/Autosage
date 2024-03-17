@@ -2,6 +2,7 @@ import streamlit as st
 from app1 import app1
 from app2 import app2
 from app3 import app3
+from app4 import app4
 
 def main():
     # Set page config for favicon and layout
@@ -65,14 +66,13 @@ def main():
     with col1:
         st.image("logo.jpg", width=100)  # Adjust path and size as needed
     with col2:
-        # Update here for moving text
         st.markdown("<div class='moving-text'><h1 class='headline'>Welcome to Autosage!</h1></div>", unsafe_allow_html=True)
 
     # Sidebar navigation
     st.sidebar.title('🚀 Navigation')
     app_selection = st.sidebar.radio(
         'Go to', 
-        ['Home', 'Text-based Data Model 🌟', 'Audio-based Data Model 🎈', 'Image-based Data Model 🎉']
+        ['Home', 'Text-based Data Model 🌟', 'Audio-based Data Model 🎈', 'Image-based Data Model 🎉', 'Multi Image-based Data Model 🗽']
     )
 
     if app_selection == 'Home':
@@ -86,6 +86,8 @@ def main():
         app2()
     elif app_selection == 'Image-based Data Model 🎉':
         app3()
+    elif app_selection == 'Multi Image-based Data Model 🗽':
+        app4()
 
     # Add visual separation after app content
     st.markdown('---')
